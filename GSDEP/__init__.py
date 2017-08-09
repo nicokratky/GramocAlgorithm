@@ -6,6 +6,8 @@ import json
 import threading
 from time import sleep
 
+from sense_hat import SenseHat
+
 logger = logging.getLogger(__name__)
 
 coloredlogs.install(level='DEBUG', logger=logger)
@@ -26,7 +28,12 @@ CHANNELS = {
 	'DAT': 2
 }
 
-CMDS = ['CNCT', 'DISCNCT']
+CMDS = {
+	'connect': 'CNCT',
+	'disconnect': 'DISCNCT',
+	'start_data': 'STRTDAT',
+	'stop_data': 'STPDATA'
+}
 
 PACK_FORMAT = '>IHH'
 METADATA_LENGTH = struct.calcsize(PACK_FORMAT)
@@ -135,6 +142,7 @@ class Server:
 		self.running = False
 
 		self.client_connected = False
+		self.data_requested = False
 		self.connection = None
 		self.client_address = None
 
@@ -168,10 +176,10 @@ class Server:
 		while 1:
 			data = self.recv()
 
-			if(data is not None and data['channel'] == CHANNELS['COM'] and data['msg'] == 'CNCT'):
+			if(data is not None and data['channel'] == CHANNELS['COM'] and data['msg'] == CMDS['connect']):
 				logger.info('Shaking hands...')
 				self.client_connected = True
-				self.send('CNCT')
+				self.send(CMDS['connect'])
 				break
 			else:
 				sleep(0.1)
@@ -180,11 +188,26 @@ class Server:
 
 		logger.debug('END')
 
+	def send_data(self):
+		sense = SenseHat()
+
+		while self.running and self.client_connected:
+			while self.data_requested:
+				logger.debug('Data requested!')
+				self.send(sense.get_accelerometer_raw())
+				sleep(0.001)
+			sleep(0.1)
 
 	def run(self):
-		self.send({'x': 123, 'y': 456})
-
 		self.running = True
+
+		logger.debug('Starting Data Thread!')		
+
+		thread = threading.Thread(target=self.send_data)
+		thread.start()
+
+		logger.debug('Data Thread started!')
+
 		while self.running and self.client_connected:
 			self.handle_request()
 
@@ -195,12 +218,16 @@ class Server:
 			self.client_connected = False
 			return
 
-		if request['msg'] in CMDS:
-			if request['msg'] == 'DISCNCT':
+		if request['msg'] in list(CMDS.values()):
+			if request['msg'] == CMDS['disconnect']:
 				logger.info('Received DISCNCT from %s', self.client_address)
 				self.client_connected = False
 				self.running = False
 				self.wait_for_handshake()
+			elif request['msg'] == CMDS['start_data']:
+				self.data_requested = True
+			elif request['msg'] == CMDS['stop_data']:
+				self.data_requested = False
 		else:
 			logger.debug('Handle request: ' + json.dumps(request))
 
