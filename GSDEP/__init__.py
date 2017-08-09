@@ -6,8 +6,6 @@ import json
 import threading
 from time import sleep
 
-from sense_hat import SenseHat
-
 logger = logging.getLogger(__name__)
 
 coloredlogs.install(level='DEBUG', logger=logger)
@@ -32,7 +30,7 @@ CMDS = {
 	'connect': 'CNCT',
 	'disconnect': 'DISCNCT',
 	'start_data': 'STRTDAT',
-	'stop_data': 'STPDATA'
+	'stop_data': 'STPDAT'
 }
 
 PACK_FORMAT = '>IHH'
@@ -146,6 +144,8 @@ class Server:
 		self.connection = None
 		self.client_address = None
 
+		self.sensor_function = None
+
 	def start(self):
 		self.running = True
 		self.sock.listen(1)
@@ -189,19 +189,20 @@ class Server:
 		logger.debug('END')
 
 	def send_data(self):
-		sense = SenseHat()
 
-		while self.running and self.client_connected:
-			while self.data_requested:
-				logger.debug('Data requested!')
-				self.send(sense.get_accelerometer_raw())
+		while self.running:
+			while self.client_connected and self.data_requested:
+				self.send(self.sensor_function())
 				sleep(0.001)
 			sleep(0.1)
+
+	def attach_readout_function(self, fun):
+		self.sensor_function = fun
 
 	def run(self):
 		self.running = True
 
-		logger.debug('Starting Data Thread!')		
+		logger.debug('Starting Data Thread!')
 
 		thread = threading.Thread(target=self.send_data)
 		thread.start()
@@ -210,6 +211,9 @@ class Server:
 
 		while self.running and self.client_connected:
 			self.handle_request()
+
+		if self.running and not self.client_connected:
+			self.wait_for_handshake()
 
 	def handle_request(self):
 		request = self.recv()
@@ -222,6 +226,7 @@ class Server:
 			if request['msg'] == CMDS['disconnect']:
 				logger.info('Received DISCNCT from %s', self.client_address)
 				self.client_connected = False
+				self.data_requested = False
 				self.running = False
 				self.wait_for_handshake()
 			elif request['msg'] == CMDS['start_data']:
