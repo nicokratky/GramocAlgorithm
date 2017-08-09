@@ -3,6 +3,7 @@ import socket
 import logging
 import coloredlogs
 import json
+import threading
 from time import sleep
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,9 @@ DATA_TYPES = {
 	dict: 1,
 	str: 2,
 	int: 3,
-	float: 4
+	float: 4,
+	'list int': 5,
+	'list float': 6,
 }
 
 CHANNELS = {
@@ -25,7 +28,7 @@ CHANNELS = {
 
 CMDS = ['CNCT', 'DISCNCT']
 
-PACK_FORMAT = '>IBB'
+PACK_FORMAT = '>IHH'
 METADATA_LENGTH = struct.calcsize(PACK_FORMAT)
 
 def _send(sock, msg, channel=CHANNELS['COM']):
@@ -34,7 +37,7 @@ def _send(sock, msg, channel=CHANNELS['COM']):
 
 	total_sent = 0
 	while total_sent < len(data):
-		sent = sock.send(data[total_sent:])
+		sent = sock.send(data[total_sent:min(len(data), BUFSIZE)])
 		total_sent += sent
 
 	logger.debug('Message sent: %s', data)
@@ -45,16 +48,18 @@ def _recv(sock):
 	if header is None:
 		return None
 
-	msglen, data_type, channel = header[0], header[1], header[2]
+	msg_len, data_type, channel = header[0], header[1], header[2]
 
-	logger.debug('Message of length %d will be received.', msglen)
+	logger.debug('Message of length %d will be received.', msg_len)
 
-	message = _recvall(sock, msglen)
+	message = _recvall(sock, msg_len)
 
 	data = {
 		'channel': channel,
 		'msg': convert_data(message, data_type)
 	}
+
+	logger.debug('Got: %s', data['msg'])
 
 	return data
 
@@ -63,7 +68,7 @@ def _recvall(sock, n):
 	bytes_rcvd = 0
 
 	while bytes_rcvd < n:
-		chunk = sock.recv(min(n - bytes_rcvd, 2048))
+		chunk = sock.recv(min(n - bytes_rcvd, BUFSIZE))
 
 		if chunk == b'':
 			return None
@@ -78,10 +83,19 @@ def prepare_data(data):
 
 	if data_type == str:
 		data = data.encode()
-	elif data_type in (dict, list):
+	elif data_type == dict:
 		data = json.dumps(data, separators=(',',':')).encode()
 	elif data_type in (int, float):
 		data = str(data).encode()
+	elif data_type == list:
+		inner_type = type(data[0])
+
+		if inner_type == int:
+			data_type = 'list int'
+		elif inner_type == float:
+			data_type = 'list float'
+
+		data = data = json.dumps(data, separators=(',',':')).encode()
 
 	return data, data_type
 
@@ -94,6 +108,8 @@ def convert_data(data, data_type):
 		return int(data.decode())
 	elif data_type == DATA_TYPES[float]:
 		return float(data.decode())
+	elif data_type in (DATA_TYPES['list float'], DATA_TYPES['list int']):
+		return json.loads(data.decode())
 
 	return None
 
@@ -113,7 +129,7 @@ def get_header(sock):
 class Server:
 	def __init__(self, ip, port):
 		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
+		self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		self.sock.bind((ip, port))
 
 		self.running = False
@@ -152,7 +168,7 @@ class Server:
 		while 1:
 			data = self.recv()
 
-			if(data['channel'] == CHANNELS['COM'] and data['msg'] == 'CNCT'):
+			if(data is not None and data['channel'] == CHANNELS['COM'] and data['msg'] == 'CNCT'):
 				logger.info('Shaking hands...')
 				self.client_connected = True
 				self.send('CNCT')
@@ -162,14 +178,22 @@ class Server:
 
 		self.run()
 
+		logger.debug('END')
+
 
 	def run(self):
+		self.send({'x': 123, 'y': 456})
+
 		self.running = True
 		while self.running and self.client_connected:
 			self.handle_request()
 
 	def handle_request(self):
 		request = self.recv()
+
+		if request is None:
+			self.client_connected = False
+			return
 
 		if request['msg'] in CMDS:
 			if request['msg'] == 'DISCNCT':
@@ -200,10 +224,8 @@ class Client:
 			self.send('CNCT')
 
 			data = self.recv()
-			if data is None:
-				continue
 
-			if(data['channel'] == CHANNELS['COM'] and data['msg'] == 'CNCT'):
+			if(data is not None and data['channel'] == CHANNELS['COM'] and data['msg'] == 'CNCT'):
 				break
 			else:
 				sleep(0.1)
