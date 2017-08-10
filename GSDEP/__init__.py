@@ -40,12 +40,16 @@ def _send(sock, msg, channel=CHANNELS['COM']):
 	data, data_type = prepare_data(msg)
 	data = pack_data(data, data_type, channel)
 
-	total_sent = 0
-	while total_sent < len(data):
-		sent = sock.send(data[total_sent:min(len(data), BUFSIZE)])
-		total_sent += sent
+	try:
+		total_sent = 0
+		while total_sent < len(data):
+			sent = sock.send(data[total_sent:min(len(data), BUFSIZE)])
+			total_sent += sent
 
-	logger.debug('Message sent: %s', data)
+		logger.debug('Message sent: %s', data)
+		return True
+	except ConnectionError:
+		return None
 
 def _recv(sock):
 	header = get_header(sock)
@@ -158,7 +162,9 @@ class Server:
 
 	def send(self, msg, channel=CHANNELS['COM']):
 		if self.client_connected:
-			_send(self.connection, msg, channel)
+			suc = _send(self.connection, msg, channel)
+			if suc is None:
+				self.reset_client()
 
 	def recv(self):
 		"""Receive message from Client
