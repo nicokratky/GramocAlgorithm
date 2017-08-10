@@ -197,9 +197,8 @@ class Server:
 	def send_data(self):
 
 		while self.running:
-			while self.client_connected and self.data_requested:
+			while self.running and self.client_connected and self.data_requested:
 				self.send(self.sensor_function())
-				sleep(0.001)
 			sleep(0.1)
 
 	def attach_readout_function(self, fun):
@@ -225,14 +224,13 @@ class Server:
 		request = self.recv()
 
 		if request is None:
-			self.client_connected = False
+			self.reset_client()
 			return
 
 		if request['msg'] in list(CMDS.values()):
 			if request['msg'] == CMDS['disconnect']:
 				logger.info('Received DISCNCT from %s', self.client_address)
-				self.client_connected = False
-				self.data_requested = False
+				self.reset_client()
 				self.running = False
 				self.wait_for_handshake()
 			elif request['msg'] == CMDS['start_data']:
@@ -242,7 +240,9 @@ class Server:
 		else:
 			logger.debug('Handle request: ' + json.dumps(request))
 
-
+	def reset_client(self):
+		self.client_connected = False
+		self.data_requested = False
 
 class Client:
 	def __init__(self, ip, port):
