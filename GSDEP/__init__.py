@@ -8,7 +8,7 @@ from time import sleep
 
 logger = logging.getLogger(__name__)
 
-coloredlogs.install(level='DEBUG', logger=logger)
+coloredlogs.install(level='DEBUG', logger=logger, milliseconds=True)
 
 BUFSIZE = 4096
 
