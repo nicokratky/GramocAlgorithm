@@ -228,7 +228,7 @@ class Server:
 			return
 
 		if request['msg'] in list(CMDS.values()):
-			looger.info('Received %s from %s', request['msg'], self.client_address)
+			logger.info('Received %s from %s', request['msg'], self.client_address)
 			if request['msg'] == CMDS['disconnect']:
 				self.reset_client()
 				self.running = False
