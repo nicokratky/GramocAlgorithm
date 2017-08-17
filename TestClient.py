@@ -1,7 +1,7 @@
 import sys
 from GSDEP import Client, CHANNELS, CMDS
 import logging
-from time import sleep
+from time import sleep, time
 import threading
 
 FORMAT = '%(asctime)s - %(name)s - %(threadName)s - %(levelname)s: %(message)s'
@@ -17,7 +17,10 @@ try:
 
 	c.send(CMDS['start_data'])
 
-	while 1:
+	start = time()
+	while start + 5 > time():
 		print(c.recv())
 except KeyboardInterrupt:
+	pass
+finally:
 	c.close()

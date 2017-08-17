@@ -39,8 +39,8 @@ class SensorHandler(GSDEPHandler):
 					logging.debug('Added %s to requesting', sock.getpeername())
 			if payload == CMDS['stop_data']:
 				if sock in self.requesting:
-					self.requesting.remove(sock)
 					logging.debug('Removed %s from requesting', sock.getpeername())
+					self.requesting.remove(sock)
 		else:
 			print(payload)
 
@@ -49,6 +49,7 @@ class SensorHandler(GSDEPHandler):
 		while self.server.running:
 			data = [random.uniform(-1.8, 1.8), random.uniform(-1.8, 1.8), random.uniform(-1.8, 1.8)]
 			self.server.multicast(self.requesting, data)
+			sleep(0.01)
 
 
 try:

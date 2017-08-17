@@ -102,10 +102,21 @@ public class Client {
         send(COMMAND.STOP_DATA.value);
         send(COMMAND.DISCONNECT.value);
 
-        try {
-            socket.close();
-        } catch (IOException e) {
-            e.printStackTrace();
+        Readout r;
+        boolean closed = false;
+
+        while(!closed) {
+            r = recv();
+            if (r != null
+                    && r.getChannel() == CHANNELS.COM
+                    && r.getDataType() == DATA_TYPES.STRING
+                    && String.valueOf(r.getData()).equals(COMMAND.DISCONNECT.value)) {
+                try {
+                    socket.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
         }
     }
 
@@ -239,25 +250,30 @@ public class Client {
 
         DATA_TYPES d = DATA_TYPES.getDataType(data_type);
 
-        String arr;
+        String s = new String(data);
+        String[] sarr;
 
         switch (d) {
             case HASH_MAP:
-                return new JSONObject(new String(data));
+                return new JSONObject(s);
             case STRING:
-                return new String(data);
+                return s;
             case INT:
-                return Integer.parseInt(new String(data));
+                return Integer.parseInt(s);
             case FLOAT:
-                return Float.parseFloat(new String(data));
+                return Float.parseFloat(s);
             case LIST_INT:
-                arr = new String(data);
-                return Arrays.stream(arr.substring(1, arr.length()-1).split(","))
-                        .map(String::trim).mapToInt(Integer::parseInt).toArray();
+                sarr = s.substring(1, s.length() - 1).split(",");
+                int[] iarr = new int[sarr.length];
+                for(int i = 0; i < sarr.length; i++) {
+                    iarr[i] = Integer.parseInt(sarr[i].trim());
+                }
             case LIST_FLOAT:
-                arr = new String(data);
-                return Arrays.stream(arr.substring(1, arr.length()-1).split(","))
-                        .map(String::trim).mapToDouble(Double::parseDouble).toArray();
+                sarr = s.substring(1, s.length() - 1).split(",");
+                double[] darr = new double[sarr.length];
+                for(int i = 0; i < sarr.length; i++) {
+                    darr[i] = Double.parseDouble(sarr[i].trim());
+                }
             case NOT_FOUND:
                 break;
         }
