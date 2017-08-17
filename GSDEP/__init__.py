@@ -1,14 +1,14 @@
 import struct
 import socket
 import logging
-import coloredlogs
 import json
 import threading
 from time import sleep
+import select
 
+FORMAT = '%(asctime)s - %(name)s - %(threadName)s - %(levelname)s: %(message)s'
+logging.basicConfig(level=logging.DEBUG, format=FORMAT)
 logger = logging.getLogger(__name__)
-
-coloredlogs.install(level='DEBUG', logger=logger, milliseconds=True)
 
 BUFSIZE = 4096
 
@@ -27,257 +27,282 @@ CHANNELS = {
 }
 
 CMDS = {
-	'connect': 'CNCT',
-	'disconnect': 'DISCNCT',
-	'start_data': 'STRTDAT',
-	'stop_data': 'STPDAT'
+	'synchronize': 'SYN',
+	'acknowledge': 'ACK',
+	'disconnect': 'FIN',
+	'start_data': 'STD',
+	'stop_data': 'SPD',
 }
 
 PACK_FORMAT = '>IHH'
 METADATA_LENGTH = struct.calcsize(PACK_FORMAT)
 
-def _send(sock, msg, channel=CHANNELS['COM']):
-	data, data_type = prepare_data(msg)
-	data = pack_data(data, data_type, channel)
+class GSDEPException(Exception):
+	pass
 
-	try:
-		total_sent = 0
-		while total_sent < len(data):
-			sent = sock.send(data[total_sent:min(len(data), BUFSIZE)])
-			total_sent += sent
+class GSDEPHandler:
+	def __init__(self):
+		pass
 
-		logger.debug('Message sent: %s', data)
-		return True
-	except ConnectionError:
-		return None
+	def recv(self, msg, sock):
+		logger.debug('Received %s from %s', msg, sock.getpeername())
 
-def _recv(sock):
-	header = get_header(sock)
+	def connect(self, sock):
+		logger.info('%s connected', sock.getpeername())
 
-	if header is None:
-		return None
+	def disconnect(self, sock):
+		logger.info('%s disconnected', sock.getpeername())
 
-	msg_len, data_type, channel = header[0], header[1], header[2]
+class Shared:
+	def __init__(self, sock):
+		self.sock = sock
 
-	logger.debug('Message of length %d will be received.', msg_len)
+	def _send(self, sock, msg, channel=CHANNELS['COM']):
+		data, data_type = self.prepare_data(msg)
+		data = self.pack_data(data, data_type, channel)
 
-	message = _recvall(sock, msg_len)
+		try:
+			total_sent = 0
+			while total_sent < len(data):
+				sent = sock.send(data[total_sent:min(len(data), BUFSIZE)])
+				total_sent += sent
 
-	data = {
-		'channel': channel,
-		'msg': convert_data(message, data_type)
-	}
-
-	logger.debug('Got: %s', data['msg'])
-
-	return data
-
-def _recvall(sock, n):
-	chunks = []
-	bytes_rcvd = 0
-
-	while bytes_rcvd < n:
-		chunk = sock.recv(min(n - bytes_rcvd, BUFSIZE))
-
-		if chunk == b'':
+			logger.debug('Message sent: %s', data)
+			return True
+		except (BrokenPipeError, ConnectionResetError):
 			return None
 
-		chunks.append(chunk)
-		bytes_rcvd += len(chunk)
+	def _recv(self, sock):
+		header = self.get_header(sock)
 
-	return b''.join(chunks)
+		if header is None:
+			return None
 
-def prepare_data(data):
-	data_type = type(data)
+		msg_len, data_type, channel = header[0], header[1], header[2]
 
-	if data_type == str:
-		data = data.encode()
-	elif data_type == dict:
-		data = json.dumps(data, separators=(',',':')).encode()
-	elif data_type in (int, float):
-		data = str(data).encode()
-	elif data_type == list:
-		inner_type = type(data[0])
+		logger.debug('Message of length %d will be received.', msg_len)
 
-		if inner_type == int:
-			data_type = 'list int'
-		elif inner_type == float:
-			data_type = 'list float'
+		message = self._recvall(sock, msg_len)
 
-		data = data = json.dumps(data, separators=(',',':')).encode()
+		data = {
+			'channel': channel,
+			'msg': self.convert_data(message, data_type)
+		}
 
-	return data, data_type
+		logger.debug('Got: %s', data['msg'])
 
-def convert_data(data, data_type):
-	if data_type == DATA_TYPES[str]:
-		return data.decode()
-	elif data_type == DATA_TYPES[dict]:
-		return json.loads(data.decode())
-	elif data_type == DATA_TYPES[int]:
-		return int(data.decode())
-	elif data_type == DATA_TYPES[float]:
-		return float(data.decode())
-	elif data_type in (DATA_TYPES['list float'], DATA_TYPES['list int']):
-		return json.loads(data.decode())
+		return data
 
-	return None
+	def _recvall(self, sock, n):
+		chunks = []
+		bytes_rcvd = 0
 
-def pack_data(data, data_type, channel):
-	return struct.pack(PACK_FORMAT, len(data), DATA_TYPES[data_type], channel) + data
+		while bytes_rcvd < n:
+			try:
+				chunk = sock.recv(min(n - bytes_rcvd, BUFSIZE))
+			except OSError:
+				logging.warning('Error receiving message, socket not connected')
+				return None
 
-def get_header(sock):
-	header = _recvall(sock, METADATA_LENGTH)
+			if chunk == b'':
+				return None
 
-	if not header:
+			chunks.append(chunk)
+			bytes_rcvd += len(chunk)
+
+		return b''.join(chunks)
+
+	def prepare_data(self, data):
+		data_type = type(data)
+
+		if data_type == str:
+			data = data.encode()
+		elif data_type == dict:
+			data = json.dumps(data, separators=(',',':')).encode()
+		elif data_type in (int, float):
+			data = str(data).encode()
+		elif data_type == list:
+			inner_type = type(data[0])
+
+			if inner_type == int:
+				data_type = 'list int'
+			elif inner_type == float:
+				data_type = 'list float'
+
+			data = data = json.dumps(data, separators=(',',':')).encode()
+
+		return data, data_type
+
+	def convert_data(self, data, data_type):
+		if data_type == DATA_TYPES[str]:
+			return data.decode()
+		elif data_type == DATA_TYPES[dict]:
+			return json.loads(data.decode())
+		elif data_type == DATA_TYPES[int]:
+			return int(data.decode())
+		elif data_type == DATA_TYPES[float]:
+			return float(data.decode())
+		elif data_type in (DATA_TYPES['list float'], DATA_TYPES['list int']):
+			return json.loads(data.decode())
+
 		return None
 
-	unpacked = struct.unpack(PACK_FORMAT, header)
+	def pack_data(self, data, data_type, channel):
+		return struct.pack(PACK_FORMAT, len(data), DATA_TYPES[data_type], channel) + data
 
-	return unpacked[0], unpacked[1], unpacked[2]
+	def get_header(self, sock):
+		header = self._recvall(sock, METADATA_LENGTH)
 
-class Server:
-	def __init__(self, ip, port):
+		if not header:
+			return None
+
+		unpacked = struct.unpack(PACK_FORMAT, header)
+
+		return unpacked[0], unpacked[1], unpacked[2]
+
+class Server(Shared):
+	def __init__(self, handler, ip='', port=1337, backlog=1):
 		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		self.sock.bind((ip, port))
+		self.sock.listen(backlog)
 
-		self.running = False
+		self.handler = handler
 
-		self.client_connected = False
-		self.data_requested = False
-		self.connection = None
-		self.client_address = None
+		super().__init__(self.sock)
 
-		self.sensor_function = None
+		self.clients = []
 
-	def start(self):
 		self.running = True
-		self.sock.listen(1)
-		self.wait_for_handshake()
+
+		t = threading.Thread(target=self._thread_accept_clients)
+		t.start()
+
+	def _thread_accept_clients(self):
+		while self.running:
+			logging.info('Waiting for connection')
+			(conn, addr) = self.sock.accept()
+			logging.info('Got connection from %s', addr)
+
+			if self.handshake(conn):
+				self.clients.append(conn)
+
+				logger.info('%s connected', addr)
+
+				logger.info('Starting receive thread for %s', addr)
+				t = threading.Thread(target=self._thread_receive, args=(conn,), daemon=True)
+				t.start()
+
+				self.handler.connect(conn)
+			else:
+				conn.close()
+
+	def _thread_receive(self, sock):
+		logger.debug('Receive thread for %s started', sock.getpeername())
+		while self.running:
+			req = self._recv(sock)
+
+			if req is None:
+				self.disconnect(sock)
+				return
+			else:
+				self.handler.recv(req, sock)
+
+	def handshake(self, sock):
+		request = self.recv(sock)
+
+		if request is not None and request['msg'] == CMDS['synchronize']:
+			logger.info('Shaking hands with %s', sock.getpeername())
+
+			self.send(sock, CMDS['acknowledge'], handshake=True)
+
+			response = self.recv(sock)
+
+			if response is not None and response['msg'] == CMDS['acknowledge']:
+				return True
+		return False
+
+	def disconnect(self, sock):
+		self.clients.remove(sock)
+		self.handler.disconnect(sock)
 
 	def shutdown(self):
 		logger.info('Shutting down')
-		self.running = False
+
+		self.runnning = False
+
+		for c in self.clients:
+			c.close()
+
+		self.clients = []
+
 		self.sock.close()
 
-	def send(self, msg, channel=CHANNELS['COM']):
-		if self.client_connected:
-			suc = _send(self.connection, msg, channel)
-			if suc is None:
-				self.reset_client()
+	def send(self, sock, msg, channel=CHANNELS['COM'], handshake=False):
+		if (sock in self.clients) or handshake:
+			suc = self._send(sock, msg, channel)
 
-	def recv(self):
-		"""Receive message from Client
-		Only for communication purposes
-		No Data is sent to the server
-		"""
-
-		return _recv(self.connection)
-
-	def wait_for_handshake(self):
-		logger.info('Waiting for connection')
-		self.connection, self.client_address = self.sock.accept()
-		logger.info('Got connection from %s', self.client_address)
-
-		while 1:
-			data = self.recv()
-
-			if(data is not None and data['channel'] == CHANNELS['COM'] and data['msg'] == CMDS['connect']):
-				logger.info('Shaking hands...')
-				self.client_connected = True
-				self.send(CMDS['connect'])
-				break
-			else:
-				sleep(0.1)
-
-		self.run()
-
-		logger.debug('END')
-
-	def send_data(self):
-
-		while self.running:
-			while self.running and self.client_connected and self.data_requested:
-				self.send(self.sensor_function())
-			sleep(0.1)
-
-	def attach_readout_function(self, fun):
-		self.sensor_function = fun
-
-	def run(self):
-		self.running = True
-
-		logger.debug('Starting Data Thread!')
-
-		thread = threading.Thread(target=self.send_data)
-		thread.start()
-
-		logger.debug('Data Thread started!')
-
-		while self.running and self.client_connected:
-			self.handle_request()
-
-		if self.running and not self.client_connected:
-			self.wait_for_handshake()
-
-	def handle_request(self):
-		request = self.recv()
-
-		if request is None:
-			self.reset_client()
-			return
-
-		if request['msg'] in list(CMDS.values()):
-			logger.info('Received %s from %s', request['msg'], self.client_address)
-			if request['msg'] == CMDS['disconnect']:
-				self.reset_client()
-				self.running = False
-				self.wait_for_handshake()
-			elif request['msg'] == CMDS['start_data']:
-				self.data_requested = True
-			elif request['msg'] == CMDS['stop_data']:
-				self.data_requested = False
+			if not suc:
+				self.disconnect(sock)
+				return
 		else:
-			logger.debug('Handle request: ' + json.dumps(request))
+			raise GSDEPException('Client not connected!')
 
-	def reset_client(self):
-		self.client_connected = False
-		self.data_requested = False
+	def multicast(self, sock_list, msg, channel=CHANNELS['COM']):
+		for sock in sock_list:
+			self.send(sock, msg, channel)
 
-class Client:
-	def __init__(self, ip, port):
+	def recv(self, sock):
+			return self._recv(sock)
+
+class Client(Shared):
+	def __init__(self, ip='localhost', port=1337):
 		socket.setdefaulttimeout(5)
 
 		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.ip = ip
+		self.port = port
 
-		self.server_address = (ip, port)
+		super().__init__(self.sock)
+
+		self.connected = False
 
 	def connect(self):
-		logger.info('Connecting to %s', self.server_address)
-		self.sock.connect(self.server_address)
-		logger.info('Connected to server.')
+		logger.info('Connecting to %s on port %d', self.ip, self.port)
+		self.sock.connect((self.ip, self.port))
 
-		logger.info('Shaking hands...')
-		while True:
-			self.send('CNCT')
+		if self.handshake():
+			logger.info('Connected')
+			self.connected = True
+			return True
+		else:
+			return False
 
-			data = self.recv()
+	def handshake(self):
+		logger.info('Performing handshake')
 
-			if(data is not None and data['channel'] == CHANNELS['COM'] and data['msg'] == 'CNCT'):
-				break
-			else:
-				sleep(0.1)
+		self.send(CMDS['synchronize'])
+
+		response = self.recv()
+
+		if response is not None and response['msg'] == CMDS['acknowledge']:
+			logger.debug('Received SYN/ACK')
+			self.send(CMDS['acknowledge'])
+			return True
+
+		return False
 
 	def send(self, msg):
 		try:
-			_send(self.sock, msg, CHANNELS['COM'])
+			self._send(self.sock, msg, CHANNELS['COM'])
 		except BrokenPipeError as e:
 			logger.error('Failed to send, broken pipe', exc_info=True)
 
 	def recv(self):
-		return _recv(self.sock)
+		return self._recv(self.sock)
 
 	def close(self):
 		logger.info('Closing connection')
-		self.send('DISCNCT')
+		self.send(CMDS['stop_data'])
+		self.send(CMDS['disconnect'])
 		self.sock.close()

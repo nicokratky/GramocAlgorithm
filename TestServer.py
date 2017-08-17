@@ -1,20 +1,33 @@
 import sys
-import GSDEP
+from GSDEP import Server, GSDEPHandler, CHANNELS, CMDS
 from time import sleep
 import random
+import logging
+import threading
 
-ip = sys.argv[1] if len(sys.argv) > 1 else ''
-port = int(sys.argv[2] if len(sys.argv) > 2 else 1337)
+FORMAT = '%(asctime)s - %(name)s - %(threadName)s - %(levelname)s: %(message)s'
+logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+logger = logging.getLogger(__name__)
 
-s = GSDEP.Server(ip, port)
+IP = sys.argv[1] if len(sys.argv) > 1 else ''
+PORT = int(sys.argv[2] if len(sys.argv) > 2 else 1337)
 
-def sensor():
-	sleep(0.01)
-	return [random.uniform(-1.8, 1.8), random.uniform(-1.8, 1.8), random.uniform(-1.8, 1.8)]
+class SensorHandler(GSDEPHandler):
+	def __init__(self):
+		super().__init__()
 
-s.attach_readout_function(sensor)
+		self.server = Server(self, IP, PORT)
+
+	def connect(self, sock):
+
+	def disconnect(self, sock):
+		pass
+
+	def recv(self, msg, sock):
+		pass
 
 try:
-	s.start()
+	sensor = SensorHandler()
 except KeyboardInterrupt:
-	s.shutdown()
+	sensor.server.shutdown()
+
