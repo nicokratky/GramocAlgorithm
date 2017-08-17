@@ -206,6 +206,11 @@ class Server(Shared):
 				self.disconnect(sock)
 				return
 			else:
+				if req['msg'] in CMDS.values():
+					if req['msg'] == CMDS['disconnect']:
+						self.disconnect(sock)
+						return
+
 				self.handler.recv(req, sock)
 
 	def handshake(self, sock):
@@ -225,6 +230,7 @@ class Server(Shared):
 	def disconnect(self, sock):
 		self.clients.remove(sock)
 		self.handler.disconnect(sock)
+		logging.info('%s disconnected', sock.getpeername())
 
 	def shutdown(self):
 		logger.info('Shutting down')

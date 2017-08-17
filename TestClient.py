@@ -14,5 +14,10 @@ PORT = sys.argv[2] if len(sys.argv) > 2 else 1337
 try:
 	c = Client(IP, PORT)
 	c.connect()
+
+	c.send(CMDS['start_data'])
+
+	while 1:
+		print(c.recv())
 except KeyboardInterrupt:
 	c.close()
