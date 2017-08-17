@@ -69,10 +69,13 @@ public class Client {
     }
 
     public enum COMMAND {
-        CONNECT("CNCT"),
-        CLOSE("CLS");
+        SYNCHRONIZE("SYN"),
+        ACKNOWLEDGE("ACK"),
+        DISCONNECT("FIN"),
+        START_DATA("STD"),
+        STOP_DATA("SPD");
 
-        private final String value;
+        public final String value;
 
         COMMAND(String value) {
             this.value = value;
@@ -81,24 +84,24 @@ public class Client {
 
     private Socket socket;
 
-    public Client() {
+    public Client() throws UnknownHostException {
         this("localhost", 1337);
     }
 
-    public Client(String server_ip, int server_port) {
+    public Client(String server_ip, int server_port) throws UnknownHostException {
 
         SERVER_IP = server_ip;
         SERVER_PORT = server_port;
 
-        try {
-            socket = open_socket(SERVER_IP, SERVER_PORT, 5);
+        socket = open_socket(SERVER_IP, SERVER_PORT, 5);
 
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
     }
 
     public void close() {
+        System.out.println("Closing connection");
+        send(COMMAND.STOP_DATA.value);
+        send(COMMAND.DISCONNECT.value);
+
         try {
             socket.close();
         } catch (IOException e) {
@@ -139,14 +142,12 @@ public class Client {
 
             byte[] packed_data = pack_data(data, data_type, channel);
 
-            /*int sent = 0;
+            int sent = 0;
 
             while(sent < packed_data.length) {
                 output.write(packed_data, sent, Math.min(packed_data.length-sent, BUFSIZE));
                 sent += Math.min((packed_data.length-sent), BUFSIZE);
-            }*/
-
-            output.write(packed_data);
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -264,53 +265,56 @@ public class Client {
         return null;
     }
 
-    private static Socket open_socket(String ip, int port, int timeout) throws Exception {
-        Socket s;
+    private static Socket open_socket(String ip, int port, int timeout) throws UnknownHostException {
+        Socket s = null;
 
         InetAddress inet_address = InetAddress.getByName(SERVER_IP);
-        SocketAddress socket_address = new InetSocketAddress(inet_address, SERVER_PORT);
 
-        s = new Socket();
-
-        int timeout_ms = timeout * 1000;
-
-        s.connect(socket_address, timeout_ms);
+        try {
+            s = new Socket(inet_address, SERVER_PORT);
+        }
+        catch (IOException e) {
+            e.printStackTrace();
+        }
 
         return s;
     }
 
-    public void connect() {
-        while (true) {
-            send(COMMAND.CONNECT.value);
-            System.out.println("Sent handshake command!");
+    public boolean connect() {
+        System.out.println("Shaking hands");
+        send(COMMAND.SYNCHRONIZE.value);
 
-            Readout r = recv();
+        Readout r = recv();
 
-            if (r != null
-                    && r.getChannel() == CHANNELS.COM
-                    && r.getDataType() == DATA_TYPES.STRING
-                    && String.valueOf(r.getData()).equals(COMMAND.CONNECT.value)) {
-                System.out.println("Shook hands, connected!");
-                break;
-            }
-
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
+        if (r != null
+                && r.getChannel() == CHANNELS.COM
+                && r.getDataType() == DATA_TYPES.STRING
+                && String.valueOf(r.getData()).equals(COMMAND.ACKNOWLEDGE.value)) {
+            System.out.println("Received SYN/ACK");
+            send(COMMAND.ACKNOWLEDGE.value);
+            return true;
         }
+
+        return false;
+    }
+
+    public Socket getSocket() {
+        return socket;
     }
 
     public static void main(String[] args) {
 
-        Client c = new Client();
+        Client c = null;
+        try {
+            c = new Client();
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+        }
 
-        c.connect();
+        while (!c.connect());
 
+        c.send("Hallo Server");
 
-        JSONObject j = (JSONObject) c.recv().getData();
-
-        System.out.println(j.get("z"));
+        c.close();
     }
 }
