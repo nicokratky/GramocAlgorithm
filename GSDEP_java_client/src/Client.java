@@ -113,6 +113,7 @@ public class Client {
                     && String.valueOf(r.getData()).equals(COMMAND.DISCONNECT.value)) {
                 try {
                     socket.close();
+                    closed = true;
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
@@ -268,12 +269,14 @@ public class Client {
                 for(int i = 0; i < sarr.length; i++) {
                     iarr[i] = Integer.parseInt(sarr[i].trim());
                 }
+                return iarr;
             case LIST_FLOAT:
                 sarr = s.substring(1, s.length() - 1).split(",");
                 double[] darr = new double[sarr.length];
                 for(int i = 0; i < sarr.length; i++) {
                     darr[i] = Double.parseDouble(sarr[i].trim());
                 }
+                return darr;
             case NOT_FOUND:
                 break;
         }
