@@ -47,8 +47,8 @@ class SensorHandler(GSDEPHandler):
 
 	def send_sensor_data(self):
 		logging.info('Started sensor data thread')
+		sense = SenseHat()
 		while self.server.running:
-			sense = SenseHat()
 			raw = sense.get_accelerometer_raw()
 			self.server.multicast(self.requesting, [raw['x'], raw['y'], raw['z']])
 
