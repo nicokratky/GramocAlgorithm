@@ -1,5 +1,6 @@
 
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.*;
@@ -256,7 +257,11 @@ public class Client {
 
         switch (d) {
             case HASH_MAP:
-                return new JSONObject(s);
+                try {
+                    return new JSONObject(s);
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
             case STRING:
                 return s;
             case INT:
