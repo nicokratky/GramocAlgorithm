@@ -23,24 +23,24 @@ class SensorHandler(GSDEPHandler):
 		t = threading.Thread(target=self.send_sensor_data, daemon=True)
 		t.start()
 
-	def connect(self, sock):
+	def connect(self, client):
 		pass
 
-	def disconnect(self, sock):
+	def disconnect(self, client):
 		pass
 
-	def recv(self, msg, sock):
+	def recv(self, msg, client):
 		payload = msg['msg']
 
 		if payload in CMDS.values():
 			if payload == CMDS['start_data']:
-				if sock not in self.requesting:
-					self.requesting.append(sock)
-					logging.debug('Added %s to requesting', sock.getpeername())
+				if client not in self.requesting:
+					self.requesting.append(client)
+					logging.debug('Added %s to requesting', client.addr)
 			if payload == CMDS['stop_data']:
-				if sock in self.requesting:
-					logging.debug('Removed %s from requesting', sock.getpeername())
-					self.requesting.remove(sock)
+				if client in self.requesting:
+					logging.debug('Removed %s from requesting', client.addr)
+					self.requesting.remove(client)
 		else:
 			print(payload)
 
