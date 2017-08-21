@@ -50,7 +50,7 @@ class SensorHandler(GSDEPHandler):
 		while self.server.running:
 			sense = SenseHat()
 			raw = sense.get_accelerometer_raw()
-			self.server.multicast([raw['x'], raw['y'], raw['z']])
+			self.server.multicast(self.requesting, [raw['x'], raw['y'], raw['z']])
 
 
 try:
