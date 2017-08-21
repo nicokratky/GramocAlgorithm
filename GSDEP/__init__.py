@@ -37,6 +37,11 @@ CMDS = {
 PACK_FORMAT = '>IHH'
 METADATA_LENGTH = struct.calcsize(PACK_FORMAT)
 
+class ClientObject:
+	def __init__(self, sock, addr):
+		self.sock = sock
+		self.addr = addr
+
 class GSDEPException(Exception):
 	pass
 
@@ -44,14 +49,14 @@ class GSDEPHandler:
 	def __init__(self):
 		pass
 
-	def recv(self, msg, sock):
-		logger.debug('Received %s from %s', msg, sock.getpeername())
+	def recv(self, msg, client):
+		logger.debug('Received %s from %s', msg, client.addr)
 
-	def connect(self, sock):
-		logger.info('%s connected', sock.getpeername())
+	def connect(self, client):
+		logger.info('%s connected', client.addr)
 
-	def disconnect(self, sock):
-		logger.info('%s disconnected', sock.getpeername())
+	def disconnect(self, client):
+		logger.info('%s disconnected', client.addr)
 
 class Shared:
 	def __init__(self, sock):
@@ -184,54 +189,61 @@ class Server(Shared):
 			(conn, addr) = self.sock.accept()
 			logging.info('Got connection from %s', addr)
 
-			if self.handshake(conn):
-				self.clients.append(conn)
+			c = ClientObject(conn, addr)
+
+			if self.handshake(c):
+				self.clients.append(c)
 
 				logger.info('%s connected', addr)
 
 				logger.info('Starting receive thread for %s', addr)
-				t = threading.Thread(target=self._thread_receive, args=(conn,), daemon=True)
+				t = threading.Thread(target=self._thread_receive, args=(c,), daemon=True)
 				t.start()
 
 				self.handler.connect(conn)
 			else:
 				conn.close()
 
-	def _thread_receive(self, sock):
-		logger.debug('Receive thread for %s started', sock.getpeername())
+	def _thread_receive(self, client):
+		logger.debug('Receive thread for %s started', client.addr)
 		while self.running:
-			req = self._recv(sock)
+			req = self.recv(client)
 
 			if req is None:
-				self.disconnect(sock)
+				self.disconnect(client)
 				return
 			else:
 				if req['msg'] in CMDS.values():
 					if req['msg'] == CMDS['disconnect']:
-						self.disconnect(sock)
-						self.send(sock, CMDS['disconnect'], handshake=True)
+						self.disconnect(client)
+						self.send(client, CMDS['disconnect'], handshake=True)
 						return
 
-				self.handler.recv(req, sock)
+				self.handler.recv(req, client)
 
-	def handshake(self, sock):
-		request = self.recv(sock)
+	def handshake(self, client):
+		request = self.recv(client)
 
 		if request is not None and request['msg'] == CMDS['synchronize']:
-			logger.info('Shaking hands with %s', sock.getpeername())
+			logger.info('Shaking hands with %s', client.addr)
 
-			self.send(sock, CMDS['acknowledge'], handshake=True)
+			self.send(client, CMDS['acknowledge'], handshake=True)
 
-			response = self.recv(sock)
+			response = self.recv(client)
 
 			if response is not None and response['msg'] == CMDS['acknowledge']:
 				return True
 		return False
 
-	def disconnect(self, sock):
-		logging.info('%s disconnected', sock.getpeername())
-		self.clients.remove(sock)
-		self.handler.disconnect(sock)
+	def disconnect(self, client):
+		logging.info('%s disconnected', client.addr)
+
+		for i, o in enumerate(self.clients):
+		    if o.addr == client.addr:
+		        del self.clients[i]
+		        break
+
+		self.handler.disconnect(client)
 
 	def shutdown(self):
 		logger.info('Shutting down')
@@ -239,28 +251,28 @@ class Server(Shared):
 		self.runnning = False
 
 		for c in self.clients:
-			c.close()
+			c.sock.close()
 
 		self.clients = []
 
 		self.sock.close()
 
-	def send(self, sock, msg, channel=CHANNELS['COM'], handshake=False):
-		if (sock in self.clients) or handshake:
-			suc = self._send(sock, msg, channel)
+	def send(self, client, msg, channel=CHANNELS['COM'], handshake=False):
+		if (client in self.clients) or handshake:
+			suc = self._send(client.sock, msg, channel)
 
 			if not suc:
-				self.disconnect(sock)
+				self.disconnect(client)
 				return
 		else:
 			raise GSDEPException('Client not connected!')
 
-	def multicast(self, sock_list, msg, channel=CHANNELS['COM']):
-		for sock in sock_list:
-			self.send(sock, msg, channel)
+	def multicast(self, client_list, msg, channel=CHANNELS['COM']):
+		for client in client_list:
+			self.send(client, msg, channel)
 
-	def recv(self, sock):
-			return self._recv(sock)
+	def recv(self, client):
+			return self._recv(client.sock)
 
 class Client(Shared):
 	def __init__(self, ip='localhost', port=1337):
