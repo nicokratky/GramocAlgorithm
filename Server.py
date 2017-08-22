@@ -49,8 +49,10 @@ class SensorHandler(GSDEPHandler):
 		pass
 
 	def recv(self, msg, client):
-		"""
-		Handle received data
+		"""Handle received data
+
+		Checks if received message is a command
+		If no command -> print message
 		"""
 
 		payload = msg['msg']
@@ -70,19 +72,24 @@ class SensorHandler(GSDEPHandler):
 			print(payload)
 
 	def start(self):
+		"""Start threads for sending data to user"""
+
 		# start thread that sens messages to the ADC board
 		self.t_keepalive.start()
 		#start thread that read data from the ADC board and sends it to requesting clients
 		self.t_send_sensor_data.start()
 
 	def keepalive(self):
-		#continuously send OK to UDP so that it wont shut down
+		"""continuously sends OK to UDP so that it wont shut down"""
+
 		while self.server.running:
 			message = 'OK'
 			self.sensor.sendto(message.encode('utf-8'), self.sensor_addr)
 			sleep(1)
 
 	def send_sensor_data(self):
+		"""Read data from ADC board and send it to requesting clients"""
+
 		logging.info('Started sensor data thread')
 
 		while self.server.running:
