@@ -7,7 +7,7 @@ from time import sleep
 import select
 
 FORMAT = '%(asctime)s - %(name)s - %(threadName)s - %(levelname)s: %(message)s'
-logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+logging.basicConfig(level=logging.INFO, format=FORMAT)
 logger = logging.getLogger(__name__)
 
 BUFSIZE = 4096
