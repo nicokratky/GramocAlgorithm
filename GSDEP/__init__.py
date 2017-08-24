@@ -1,7 +1,7 @@
 import struct
 import socket
 import logging
-import json
+import msgpack
 import threading
 from time import sleep
 import select
@@ -10,7 +10,7 @@ FORMAT = '%(asctime)s - %(name)s - %(threadName)s - %(levelname)s: %(message)s'
 logging.basicConfig(level=logging.INFO, format=FORMAT)
 logger = logging.getLogger(__name__)
 
-BUFSIZE = 4096
+BUFSIZE = 8192
 
 DATA_TYPES = {
 	dict: 1,
@@ -34,7 +34,7 @@ CMDS = {
 	'stop_data': 'SPD',
 }
 
-PACK_FORMAT = '>IHH'
+PACK_FORMAT = '>IH'
 METADATA_LENGTH = struct.calcsize(PACK_FORMAT)
 
 class ClientObject:
@@ -79,10 +79,8 @@ class Shared:
 		returns None if message is not sent successfully
 		"""
 
-		#Data will be encoded properly and data_type is determined
-		data, data_type = self.prepare_data(msg)
 		#Data is packed together with meta information
-		data = self.pack_data(data, data_type, channel)
+		data = self.pack_data(msg, channel)
 
 		try:
 			total_sent = 0
@@ -110,7 +108,7 @@ class Shared:
 		if header is None:
 			return None
 
-		msg_len, data_type, channel = header[0], header[1], header[2]
+		msg_len, channel = header[0], header[1]
 
 		logger.debug('Message of length %d will be received.', msg_len)
 
@@ -119,7 +117,7 @@ class Shared:
 
 		data = {
 			'channel': channel,
-			'msg': self.convert_data(message, data_type)
+			'msg': msgpack.unpackb(message, encoding='utf-8')
 		}
 
 		logger.debug('Got: %s', data['msg'])
@@ -147,49 +145,12 @@ class Shared:
 
 		return b''.join(chunks)
 
-	def prepare_data(self, data):
-		"""Convert data to bytearray and return data type"""
-
-		data_type = type(data)
-
-		if data_type == str:
-			data = data.encode()
-		elif data_type == dict:
-			data = json.dumps(data, separators=(',',':')).encode()
-		elif data_type in (int, float):
-			data = str(data).encode()
-		elif data_type == list:
-			inner_type = type(data[0])
-
-			if inner_type == int:
-				data_type = 'list int'
-			elif inner_type == float:
-				data_type = 'list float'
-
-			data = data = json.dumps(data, separators=(',',':')).encode()
-
-		return data, data_type
-
-	def convert_data(self, data, data_type):
-		"""Convert bytearray back to right data type"""
-
-		if data_type == DATA_TYPES[str]:
-			return data.decode()
-		elif data_type == DATA_TYPES[dict]:
-			return json.loads(data.decode())
-		elif data_type == DATA_TYPES[int]:
-			return int(data.decode())
-		elif data_type == DATA_TYPES[float]:
-			return float(data.decode())
-		elif data_type in (DATA_TYPES['list float'], DATA_TYPES['list int']):
-			return json.loads(data.decode())
-
-		return None
-
-	def pack_data(self, data, data_type, channel):
+	def pack_data(self, data, channel):
 		"""Pack data according to the PACK_FORMAT"""
 
-		return struct.pack(PACK_FORMAT, len(data), DATA_TYPES[data_type], channel) + data
+		packed_data = msgpack.packb(data, use_bin_type=True)
+
+		return struct.pack(PACK_FORMAT, len(packed_data), channel) + packed_data;
 
 	def get_header(self, sock):
 		"""Get meta info"""
@@ -201,7 +162,7 @@ class Shared:
 
 		unpacked = struct.unpack(PACK_FORMAT, header)
 
-		return unpacked[0], unpacked[1], unpacked[2]
+		return unpacked[0], unpacked[1]
 
 class Server(Shared):
 	def __init__(self, handler, ip='', port=1337, backlog=1):
