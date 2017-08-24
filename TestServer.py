@@ -6,7 +6,7 @@ import logging
 import threading
 
 FORMAT = '%(asctime)s - %(name)s - %(threadName)s - %(levelname)s: %(message)s'
-logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+logging.basicConfig(level=logging.INFO, format=FORMAT)
 logger = logging.getLogger(__name__)
 
 IP = sys.argv[1] if len(sys.argv) > 1 else ''
@@ -47,9 +47,11 @@ class SensorHandler(GSDEPHandler):
 	def send_sensor_data(self):
 		logging.info('Started sensor data thread')
 		while self.server.running:
-			data = [random.uniform(-1.8, 1.8), random.uniform(-1.8, 1.8), random.uniform(-1.8, 1.8)]
+
+			data = [[random.uniform(-i, i) for j in range(100)] for i in range(6)]
+
 			self.server.multicast(self.requesting, data)
-			sleep(0.01)
+			sleep(0.1)
 
 
 try:
